@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registro de Horario NOPING</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .btn {
+            display: block;
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            cursor: pointer;
+            text-align: center;
+        }
+        .btn:hover {
+            background-color: #0056b3;
+        }
+        table {
+            width: 100%;
+            margin-top: 20px;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Registro de Horário NOPING</h1>
+
+        <label for="employee-name">Nome:</label>
+        <input type="text" id="employee-name" placeholder="Digite seu nome">
+
+        <button class="btn" id="start-shift">Iniciar Jornada</button>
+        <button class="btn" id="start-break">Início Intervalo</button>
+        <button class="btn" id="end-break">Retorno Intervalo</button>
+        <button class="btn" id="end-shift">Finalizar Jornada</button>
+
+        <h2>Relatório</h2>
+        <table id="report">
+            <thead>
+                <tr>
+                    <th>Evento</th>
+                    <th>Horário</th>
+                    <th>Total Horas</th>
+                </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+
+        <p id="total-hours">Total de Horas Trabalhadas: 0h</p>
+        <p id="break-hours">Tempo de Intervalo: 0h</p>
+        <p id="hash-verification">Hash de Verificação: </p>
+
+        <h2>Verificar Hash</h2>
+        <label for="hash-input">Digite a Hash:</label>
+        <input type="text" id="hash-input" placeholder="Hash">
+        <button class="btn" id="verify-hash">Verificar</button>
+        <p id="hash-result"></p>
+    </div>
+
+    <script>
+        const BASE_ID = "app9rn5n6d7kgEbe1";
+        const API_KEY = "pat1N16RgqERJ2J8r.97ad5bcc26f0133ad529f56b5fd72f5935c9987b969e70dc43b558c28b0facc9";
+        const TABLE_NAME = "Records";
+
+        let startShiftTime = null;
+        let startBreakTime = null;
+        let endBreakTime = null;
+        let endShiftTime = null;
+
+        document.getElementById('start-shift').addEventListener('click', () => {
+            const now = new Date();
+            startShiftTime = now;
+            addRowToReport('Início da Jornada', now.toLocaleTimeString());
+        });
+
+        document.getElementById('start-break').addEventListener('click', () => {
+            const now = new Date();
+            startBreakTime = now;
+            addRowToReport('Início do Intervalo', now.toLocaleTimeString());
+        });
+
+        document.getElementById('end-break').addEventListener('click', () => {
+            const now = new Date();
+            endBreakTime = now;
+            const breakHours = calculateTotalHours(startBreakTime, endBreakTime);
+            addRowToReport('Fim do Intervalo', now.toLocaleTimeString(), breakHours);
+            document.getElementById('break-hours').textContent = `Tempo de Intervalo: ${breakHours}`;
+        });
+
+        document.getElementById('end-shift').addEventListener('click', async () => {
+            const now = new Date();
+            endShiftTime = now;
+            const totalWorkHours = calculateTotalHours(startShiftTime, endShiftTime);
+            const totalBreakHours = calculateTotalHours(startBreakTime, endBreakTime);
+
+            addRowToReport('Fim da Jornada', now.toLocaleTimeString(), totalWorkHours);
+            document.getElementById('total-hours').textContent = `Total de Horas Trabalhadas: ${totalWorkHours}`;
+            document.getElementById('break-hours').textContent = `Tempo de Intervalo: ${totalBreakHours}`;
+
+            const employeeName = document.getElementById('employee-name').value || 'Funcionário';
+            const currentDate = now.toLocaleDateString();
+            const weekday = now.toLocaleDateString(undefined, { weekday: 'long' });
+
+            const hash = await generateHash(`${employeeName}-${currentDate}-${weekday}-${startShiftTime}-${startBreakTime}-${endBreakTime}-${endShiftTime}`);
+
+            const dataToSave = {
+                name: employeeName,
+                date: currentDate,
+                weekday: weekday,
+                startShift: startShiftTime.toLocaleTimeString(),
+                startBreak: startBreakTime ? startBreakTime.toLocaleTimeString() : '-',
+                endBreak: endBreakTime ? endBreakTime.toLocaleTimeString() : '-',
+                endShift: endShiftTime.toLocaleTimeString(),
+                totalHours: totalWorkHours,
+                hash: hash,
+            };
+
+            document.getElementById('hash-verification').textContent = `Hash de Verificação: ${hash}`;
+
+            await saveToAirtable(dataToSave);
+        });
+
+        document.getElementById('verify-hash').addEventListener('click', async () => {
+            const hashInput = document.getElementById('hash-input').value.trim();
+
+            // Certifique-se de que o campo de entrada da hash não está vazio
+            if (!hashInput) {
+                document.getElementById('hash-result').textContent = 'Por favor, insira uma hash para verificar.';
+                return;
+            }
+
+            // Consulta ao Airtable usando o filtro para buscar pela hash
+            const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_NAME}?filterByFormula={hash}="${hashInput}"`;
+            const headers = {
+                "Authorization": `Bearer ${API_KEY}`,
+                "Content-Type": "application/json",
+            };
+
+            try {
+                const response = await fetch(url, { headers });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.records.length > 0) {
+                        const record = result.records[0].fields;
+                        document.getElementById('hash-result').textContent = 
+                            `Dados encontrados: Nome: ${record.name}, Data: ${record.date}, Total de Horas: ${record.totalHours}`;
+                    } else {
+                        document.getElementById('hash-result').textContent = 'Hash não encontrada.';
+                    }
+                } else {
+                    const errorData = await response.json();
+                    document.getElementById('hash-result').textContent = 
+                        `Erro ao verificar a hash: ${errorData.error.message || 'Erro desconhecido.'}`;
+                }
+            } catch (error) {
+                document.getElementById('hash-result').textContent = 'Erro de conexão ao verificar a hash.';
+                console.error('Erro de verificação:', error);
+            }
+        });
+
+        function addRowToReport(event, time, totalHours = '-') {
+            const tbody = document.getElementById('report').querySelector('tbody');
+            const row = document.createElement('tr');
+            row.innerHTML = `<td>${event}</td><td>${time}</td><td>${totalHours}</td>`;
+            tbody.appendChild(row);
+        }
+
+        async function saveToAirtable(data) {
+            const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_NAME}`;
+            const headers = {
+                "Authorization": `Bearer ${API_KEY}`,
+                "Content-Type": "application/json",
+            };
+
+            try {
+                const response = await fetch(url, {
+                    method: "POST",
+                    headers: headers,
+                    body: JSON.stringify({
+                        records: [
+                            {
+                                fields: data,
+                            },
+                        ],
+                    }),
+                });
+
+                if (response.ok) {
+                    console.log("Dados enviados para o Airtable com sucesso.");
+                } else {
+                    const errorData = await response.json();
+                    console.error("Erro ao enviar dados para o Airtable:", errorData.message || errorData);
+                }
+            } catch (error) {
+                console.error("Erro de conexão com o Airtable:", error);
+            }
+        }
+
+        async function generateHash(data) {
+            const encoder = new TextEncoder();
+            const dataBuffer = encoder.encode(data);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+            return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function calculateTotalHours(start, end) {
+            if (!start || !end) return "0:00";
+            const diff = (end - start) / (1000 * 60 * 60); // Difference in hours
+            const hours = Math.floor(diff);
+            const minutes = Math.round((diff - hours) * 60);
+            return `${hours}:${minutes.toString().padStart(2, '0')}`;
+        }
+    </script>
+</body>
+</html>
